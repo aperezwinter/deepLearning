@@ -1,0 +1,8 @@
+numpy
+matplotlib
+scipy
+torch
+torchvision
+torchaudio
+tensorflow
+keras
