@@ -32,9 +32,9 @@ class Scalar:
         
         def _backward(): # local backward
             # Let z = x - y, then dz/dx = 1, dz/dy = -1
-            # So, dz/dx = dz/dz * dz/dx = 1 * 1 = z.grad * 1 = z.grad
-            # So, dz/dy = dz/dz * dz/dy = 1 * 1 = z.grad * 1 = z.grad
-            self.grad += out.grad
+            # So, dz/dx = dz/dz * dz/dx = 1 *  1 = z.grad *  1 = z.grad
+            # So, dz/dy = dz/dz * dz/dy = 1 * -1 = z.grad * -1 = -z.grad
+            self.grad  += out.grad
             other.grad += out.grad * -1
         out._backward = _backward # set backward func from '-' operation
         
@@ -96,7 +96,18 @@ class Scalar:
         return self + other
     
     def __rsub__(self, other): # other - self
-        return other - self
+        other = other if isinstance(other, Scalar) else Scalar(other)
+        out = Scalar(value=other.value - self.value, _children=(other, self), _op='-')
+        
+        def _backward(): # local backward
+            # Let z = x - y, then dz/dx = 1, dz/dy = -1
+            # So, dz/dx = dz/dz * dz/dx = 1 *  1 = z.grad *  1 = z.grad
+            # So, dz/dy = dz/dz * dz/dy = 1 * -1 = z.grad * -1 = -z.grad
+            other.grad += out.grad
+            self.grad  += out.grad * -1
+        out._backward = _backward # set backward func from '-' operation
+        
+        return out
     
     def __rmul__(self, other): # other * self
         return self * other
@@ -165,6 +176,18 @@ class Scalar:
             # Let y = max(0,x), then dy/dx = 1(y>0) or 0 (y<=0)
             # So, dy/dx = dy/dy * dy/dx = 1 * {1,0} = out.grad * {1,0}
             self.grad += out.grad * (out.value > 0)
+        out._backward = _backward
+
+        return out
+    
+    def leaky_relu(self, alpha=0.01):
+        # Leaky rectified linear unit: f(x) = x if x > 0 else alpha*x, f' = 1 if x > 0 else alpha
+        out = Scalar(value=self.value if self.value > 0 else alpha*self.value, _children=(self,), _op='LReLU')
+        
+        def _backward():
+            # Let y = x if x > 0 else alpha*x, then dy/dx = 1 if x > 0 else alpha
+            # So, dy/dx = dy/dy * dy/dx = 1 * {1, alpha} = out.grad * {1, alpha}
+            self.grad += out.grad * (1 if self.value > 0 else alpha)
         out._backward = _backward
 
         return out

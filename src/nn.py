@@ -13,23 +13,40 @@ class Module:
     
 class Neuron(Module):
 
-    def __init__(self, nin, nonlin=True):
+    def __init__(self, nin, **kwargs):
         # nin: number of inputs
         super().__init__()
+        # self.weights = [Scalar(random.gauss(0,1)) for _ in range(nin)]
         self.weights = [Scalar(random.uniform(-1,1)) for _ in range(nin)]
         self.bias = Scalar(0)
-        self.nonlin = nonlin
+        self.act = kwargs.get('act') if 'act' in kwargs else 'linear'
 
     def __call__(self, x):
-        a = sum((wi*xi for wi,xi in zip(self.weights, x)), self.bias)
-        return a.logistic() if self.nonlin else a.linear()
-        
+        z = sum((wi*xi for wi,xi in zip(self.weights, x)), self.bias)
+        if self.act == 'sigmoid':
+            return z.logistic()
+        elif self.act == 'tanh':
+            return z.tanh()
+        elif self.act == 'relu':
+            return z.relu()
+        elif self.act == 'leaky_relu':
+            return z.leaky_relu()
+        else:
+            return z
+    
+    def __repr__(self) -> str:
+        return f"{self.act} Neuron({len(self.weights)})"
+    
     def parameters(self):
         return self.weights + [self.bias]
     
-    def __repr__(self) -> str:
-        act = "Sigmoid" if self.nonlin else "Linear"
-        return f"{act} Neuron({len(self.weights)})"
+    def reset(self):
+        for wi in self.weights:
+            #wi.value = random.gauss(0,1)
+            wi.value = random.uniform(-1,1)
+            wi.grad = 0
+        self.bias.value = 0
+        self.bias.grad = 0
     
 class Layer(Module):
 
@@ -42,20 +59,25 @@ class Layer(Module):
         out = [n(x) for n in self.neurons]
         return out[0] if len(out) == 1 else out
 
-    def parameters(self):
-        return [p for n in self.neurons for p in n.parameters()]
-
     def __repr__(self):
         return f"Layer of [{', '.join(str(n) for n in self.neurons)}]"
     
+    def parameters(self):
+        return [p for n in self.neurons for p in n.parameters()]
+    
+    def reset(self):
+        for n in self.neurons:
+            n.reset()
+    
 class MLP(Module):
 
-    def __init__(self, nin, nouts):
+    def __init__(self, nin, nouts, act='relu'):
         # nin: number of inputs (input layer)
         # nout: number of outputs (hidden + out layers)
         # nonlin=True for all hidden layers, except for the last layer
         sz = [nin] + nouts
-        self.layers = [Layer(sz[i], sz[i+1], nonlin=i!=len(nouts)-1) for i in range(len(nouts))]
+        act = act if isinstance(act, list) else [act] * len(nouts)
+        self.layers = [Layer(sz[i], sz[i+1], act=act[i]) for i in range(len(nouts))]
         self._loss = Scalar(1.0)
 
     def __call__(self, x):
@@ -70,9 +92,8 @@ class MLP(Module):
         return [p for layer in self.layers for p in layer.parameters()]
     
     def reset(self):
-        for p in self.parameters():
-            p.value = random.uniform(-1,1)
-            p.grad = 0
+        for layer in self.layers:
+            layer.reset()
     
     def backward(self):
         self.zero_grad() # flush gradients (set to zero)
@@ -98,8 +119,41 @@ class MLP(Module):
         assert N == M, f"Mismatched dimensions {N} != {M}."
         self._loss = sum(-yi * log(yj) for yi, yj in zip(y_gt, y_pred)) / N
         return self._loss if out else None
+        
+    def train_GD(self, X, y, loss='mseLoss', lr=1e-2, epochs=10000, out=True):
+        i=0; loss_values = []
+        loss_func = getattr(self, loss)     # get loss function
+        while i < epochs:
+            y_pred = self.forward(X)        # forward pass
+            loss_func(y, y_pred, out=False) # compute loss
+            self.backward()                 # backward pass
+            for p in self.parameters():     # update weights
+                p.value -= lr * p.grad
+            if out:
+                loss_values.append(self._loss.value)
+            i += 1
+        return loss_values if out else None
+    
+    def train_SGD(self, X, y, loss='mseLoss', lr=1e-2, epochs=1000, out=True):
+        i=0; loss_values = []
+        loss_func = getattr(self, loss)    # get loss function
+        while i < epochs:
+            idx = list(range(len(y)))
+            random.shuffle(idx)
+            X = X[idx]; y = y[idx]
+            for Xi, yi in zip(X, y):
+                Xi = [Xi]; yi = [yi]
+                y_pred = self.forward(Xi)           # forward pass
+                loss_func(yi, y_pred, out=False)    # compute loss
+                self.backward()                     # backward pass
+                for p in self.parameters():         # update weights
+                    p.value -= lr * p.grad
+            if out:
+                loss_values.append(self._loss.value)
+            i += 1
+        return loss_values if out else None
 
-    def fit(self, X, y, loss='mseLoss', optimizer='gd', lr=1e-2, epochs=10000, verbose=False, out=True):
+    def fit(self, X, y, loss='mseLoss', optimizer='gd', lr=1e-2, epochs=1000, verbose=False, out=True):
         i=0; epoch_loss = []
         e=int(epochs/20) if epochs > 20 else 1
         while i < epochs:
