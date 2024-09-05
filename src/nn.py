@@ -8,6 +8,10 @@ class Module:
         for p in self.parameters():
             p.grad = 0
 
+    def zero_momentum(self):
+        for p in self.parameters():
+            p.momentum = 0
+
     def parameters(self):
         return []
     
@@ -74,7 +78,7 @@ class MLP(Module):
     def __init__(self, nin, nouts, act='relu'):
         # nin: number of inputs (input layer)
         # nout: number of outputs (hidden + out layers)
-        # nonlin=True for all hidden layers, except for the last layer
+        # act: activation function (default: ReLU 'relu')
         sz = [nin] + nouts
         act = act if isinstance(act, list) else [act] * len(nouts)
         self.layers = [Layer(sz[i], sz[i+1], act=act[i]) for i in range(len(nouts))]
@@ -134,6 +138,22 @@ class MLP(Module):
             i += 1
         return loss_values if out else None
     
+    def train_GD_momentum(self, X, y, loss='mseLoss', lr=1e-2, mu=0.9, epochs=10000, out=True):
+        i=0; loss_values = []
+        loss_func = getattr(self, loss)     # get loss function
+        self.zero_momentum()
+        while i < epochs:
+            y_pred = self.forward(X)        # forward pass
+            loss_func(y, y_pred, out=False) # compute loss
+            self.backward()                 # backward pass
+            for p in self.parameters():     # update weights
+                p.momentum = mu * p.momentum + (1 - mu) * p.grad
+                p.value -= lr * p.momentum
+            if out:
+                loss_values.append(self._loss.value)
+            i += 1
+        return loss_values if out else None
+    
     def train_SGD(self, X, y, loss='mseLoss', lr=1e-2, epochs=1000, out=True):
         i=0; loss_values = []
         loss_func = getattr(self, loss)    # get loss function
@@ -147,6 +167,27 @@ class MLP(Module):
                 loss_func(yi, y_pred, out=False)    # compute loss
                 self.backward()                     # backward pass
                 for p in self.parameters():         # update weights
+                    p.value -= lr * p.grad
+            if out:
+                loss_values.append(self._loss.value)
+            i += 1
+        return loss_values if out else None
+    
+    def train_miniBatch_SGD(self, X, y, loss='mseLoss', lr=1e-2, epochs=1000, batch_size=32, out=True):
+        i=0; loss_values = []
+        batch_size = min(batch_size, len(y))
+        loss_func = getattr(self, loss)    # get loss function
+        while i < epochs:
+            idx = list(range(len(y)))
+            random.shuffle(idx)
+            X = X[idx]; y = y[idx]
+            for j in range(0, len(y), batch_size):
+                X_batch = X[j:j + batch_size]
+                y_batch = y[j:j + batch_size]
+                y_pred = self.forward(X_batch)          # forward pass
+                loss_func(y_batch, y_pred, out=False)   # compute loss
+                self.backward()                         # backward pass
+                for p in self.parameters():             # update weights
                     p.value -= lr * p.grad
             if out:
                 loss_values.append(self._loss.value)

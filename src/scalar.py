@@ -6,6 +6,7 @@ class Scalar:
     def __init__(self, value, _children=(), _op='', _label=''):
         self.value = value
         self.grad = 0
+        self.momentum = 0
         # private variables for build autograd graph
         self._backward = lambda: None
         self._prev = set(_children)

@@ -6,3 +6,5 @@ torchvision
 torchaudio
 tensorflow
 keras
+jupyter
+ipykernel
